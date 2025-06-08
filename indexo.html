@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Survey Portal</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        /* Based on your original CSS */
+        * { box-sizing: border-box; }
+        body { 
+            font-family: Arial, sans-serif; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            min-height: 100vh; 
+            margin: 0; 
+            background-color: #121212; 
+            color: white; 
+            touch-action: manipulation; 
+        }
+        .container { 
+            width: 90%; 
+            max-width: 500px; 
+            background: #1e1e1e; 
+            padding: 20px; 
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.1); 
+            border-radius: 10px; 
+            text-align: center; 
+        }
+        h1 { margin-top: 0; }
+        button { 
+            padding: 15px; 
+            font-size: 16px; 
+            background: #007bff; 
+            color: white; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            margin: 10px 0; 
+            width: 100%; 
+            touch-action: manipulation; 
+        }
+        input[type="text"] { 
+            width: 100%; 
+            padding: 12px; 
+            margin: 10px 0; 
+            font-size: 16px; 
+            border: 1px solid #555; 
+            border-radius: 8px; 
+            background-color: #333; 
+            color: white; 
+        }
+        input:invalid { border-color: #ff4444; }
+        .hidden { display: none !important; }
+        .error { color: #ff6b6b; margin-top: -5px; margin-bottom: 10px; text-align: left; }
+    </style>
+</head>
+<body>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  <div class="container">
+    <h1>Academic Research Portal</h1>
+	<p style="margin-top: -10px; font-size: 1em; color: #ccc;">
+	  Participate in one of our ongoing research studies about digital content perception. </br> Before proceeding, please enter your <strong>Student ID</strong> to begin.
+	</p>
+    <input type="text" id="studentId" placeholder="Student ID (Optional)">
+    <p id="errorMsg" style="color: red; display: none;">Please enter your Student ID.</p>
+    <button onclick="assignSurveyWithRetry()">Start Survey</button>
+    <button onclick="assignSurveyWithRetry()">Proceed Without Student ID</button>
+  </div>
+
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyDus79lxuP05XqKD2TtklSoqFtm0gft-D",
+    authDomain: "sc2025-2fe8d.firebaseapp.com",
+    projectId: "sc2025-2fe8d",
+    storageBucket: "sc2025-2fe8d.firebasestorage.app",
+    messagingSenderId: "950198928120",
+    appId: "1:950198928120:web:9a4c42214938ae64fa710d"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+
+  const surveyLinks = [
+    "https://researchsurvey.github.io/survey/real-vs-fake-survey.html",
+    "https://researchsurvey.github.io/survey/real-vs-fake-survey-apt.html",
+    "https://researchsurvey.github.io/survey/real-vs-fake-study.html",
+    "https://researchsurvey.github.io/survey/real-vs-fake-study-apt.html",
+    "https://researchsurvey.github.io/survey/real-vs-ai-survey.html",
+    "https://researchsurvey.github.io/survey/real-vs-ai-survey-apt.html"
+  ];
+
+  // ✅ Function with retry logic
+  async function assignSurveyWithRetry(retries = 5, delay = 500, overrideId = null) {
+    const storedId = localStorage.getItem("surveyUserId");
+    const studentInput = document.getElementById("studentId").value.trim();
+  
+    let finalId = overrideId || storedId || (studentInput ? studentInput : null);
+  
+    // If no ID yet, generate anonymous ID and store it
+    if (!finalId) {
+      finalId = `anon_${new Date().getTime()}`;
+      localStorage.setItem("surveyUserId", finalId);
+    }
+  
+    if (!storedId) {
+      localStorage.setItem("surveyUserId", finalId);
+    }
+    console.log("Stored ID in Firefox:", localStorage.getItem("surveyUserId"));
+	
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        await assignSurvey(finalId);
+        return;
+      } catch (err) {
+        console.warn(`Attempt ${attempt + 1} failed:`, err.message);
+        if (attempt === retries - 1) {
+          alert("We’re experiencing heavy traffic. Please try again shortly.");
+        } else {
+          await new Promise(resolve => setTimeout(resolve, delay * (attempt + 1)));
+        }
+      }
+    }
+  }
+
+
+  // 🔁 Actual survey assignment logic
+  async function assignSurvey(studentId) {
+    console.log("assignSurvey called with:", studentId);
+    const participantsRef = db.collection("participants");
+    const counterRef = db.collection("meta").doc("counter");
+  
+    const existingDoc = await participantsRef.doc(studentId).get();
+    if (existingDoc.exists) {
+      console.log("Participant already exists. Redirecting to:", existingDoc.data().assignedSurvey);
+      window.location.assign(existingDoc.data().assignedSurvey);
+      return;
+    }
+  
+    console.log("Assigning new survey...");
+  
+    try {
+      await db.runTransaction(async (transaction) => {
+        const counterSnap = await transaction.get(counterRef);
+        const currentCount = counterSnap.exists ? counterSnap.data().count : 0;
+        const assignedSurvey = surveyLinks[currentCount % surveyLinks.length];
+  
+        console.log("Assigned survey:", assignedSurvey);
+  
+        transaction.set(participantsRef.doc(studentId), {
+          studentId: studentId,
+          assignedSurvey: assignedSurvey,
+          isAnonymous: studentId.startsWith("anon_"),
+          timestamp: new Date().toISOString()
+        });
+  
+        transaction.update(counterRef, {
+          count: currentCount + 1
+        });
+  
+        console.log("Transaction successful. Redirecting...");
+        window.location.assign(assignedSurvey);
+      });
+    } catch (error) {
+      console.error("🔥 Firestore transaction failed in Firefox:", error);
+      alert("Something went wrong while assigning your survey. Please try again.");
+    }
+  } 
+
+  // Trigger by button
+  document.getElementById("studentId").addEventListener("keypress", (e) => {
+    if (e.key === "Enter") assignSurveyWithRetry();
+  });
+</script>
+</body>
+</body>
+</html>
